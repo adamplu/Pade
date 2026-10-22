@@ -70,6 +70,99 @@ def generate_synthetic_signal(order, noise_level=0, tmax=32768, delta_t=1/12000,
 
     return signal
 
+def pade_solve(signal, order, datapoints, tmax=1000, delta_t=0.01, svd=False):
+    """
+    Given a signal and the number of order to decompose into, this uses the Pade techniques detailed in the previous notebook 
+    to reconstruct (and return) the original signals. 
+    """
+
+    signal_used = signal[:datapoints].tolist()
+    empty_matrix = []
+    rhs_vector = []
+
+    for i in range(datapoints - order):
+        matrix_row = signal_used[i:order+i]
+        matrix_row.reverse()
+        empty_matrix.append(matrix_row)
+        rhs_vector.append( -1 * signal_used[order+i])
+
+    matrix = np.array(empty_matrix, dtype=complex)
+    rhs_vector = np.array(rhs_vector, dtype=complex)
+
+    scales = np.linalg.norm(matrix, axis = 0)
+    matrix_scaled = matrix / scales
+
+    if svd == True:
+
+        U, s, Vh = np.linalg.svd(matrix_scaled, full_matrices=False)
+        threshold = 1e-15 * s[0]
+        s_inv = np.array([1 / value if value > threshold else 0 for value in s])
+        q_k_scaled = Vh.conj().T @ np.diag(s_inv) @ U.conj().T @ rhs_vector
+    
+    else:
+
+        q_k_scaled, _, _, _ = np.linalg.lstsq(matrix_scaled, rhs_vector, rcond=None)
+
+    q_k = q_k_scaled / scales
+
+    coefficients = np.append(q_k[::-1], 1)
+    roots = np.roots(coefficients)
+
+    z_k = [(1 / root) for root in roots]
+
+    empty_matrix = []
+    rhs_vector = []
+
+    for i in range(datapoints):
+        matrix_row = [z**i for z in z_k]
+        empty_matrix.append(matrix_row)
+        rhs_vector.append(signal[i])
+
+    matrix = np.array(empty_matrix, dtype=complex)
+    rhs_vector = np.array(rhs_vector, dtype=complex)
+
+    scales = np.linalg.norm(matrix, axis = 0)
+    matrix_scaled = matrix / scales
+
+    if svd == True:
+
+        U, s, Vh = np.linalg.svd(matrix_scaled, full_matrices=False)
+        threshold = 1e-15 * s[0]
+        s_inv = np.array([1 / value if value > threshold else 0 for value in s])
+        d_k_scaled = Vh.conj().T @ np.diag(s_inv) @ U.conj().T @ rhs_vector
+    
+    else:
+
+        d_k_scaled, _, _, _ = np.linalg.lstsq(matrix_scaled, rhs_vector, rcond=None)
+
+    d_k = d_k_scaled / scales
+
+    mag = np.abs(z_k)
+    arg = np.angle(z_k, deg=False)
+
+    Lambda = - (np.log(mag)) / delta_t
+    Frequency = arg / (2*np.pi*delta_t)
+
+    Amplitude = np.abs(d_k)
+    Phase = np.angle(d_k, deg=False)
+
+    assert len(z_k) == len(d_k)
+
+    individual_signals = []
+
+    for z, d in zip(z_k, d_k):
+
+        signal = []
+
+        for n in range(tmax):
+            signal.append(d * z**n)
+
+        individual_signals.append(signal)
+
+    individual_signals = np.array(individual_signals, dtype=complex)
+
+    return individual_signals
+
 def matrix_pencil(signal, order, n_datapoints=200, return_singular_values=False):
 
     signal = np.asarray(signal, dtype=complex)[:n_datapoints]
